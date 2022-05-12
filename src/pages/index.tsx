@@ -1,23 +1,37 @@
-
 import type {NextPage} from 'next'
 import Head from 'next/head'
-import {useForm, SubmitHandler, Controller} from "react-hook-form";
+import {useForm, Controller} from "react-hook-form";
 import styles from '../styles/Home.module.css'
 import SelectInput from "../components/SelectInput";
-import {Button} from "@chakra-ui/react";
+import {Button, Stack} from "@chakra-ui/react";
+import {useState} from "react";
+import axios, {AxiosResponse} from "axios";
 
+import {LeaseUses} from "../lib/prisma"
+import AsyncSelectInput from "../components/AsyncSelectInput";
 
 type Inputs = {
   nameList: string[],
+  asyncNameList: string[],
 };
 
 const Home: NextPage = () => {
-  const {register, handleSubmit, control, watch, formState: {errors}, setValue} = useForm<Inputs>();
-  const onSubmit: SubmitHandler<Inputs> = data => {
-    console.log("data", data)
-    console.log("register", register)
-  }
+  const {handleSubmit, control, watch, formState: {errors}, setValue} = useForm<Inputs>();
   console.log(watch("nameList"))
+
+  const loadOptions = async (): Promise<string[]> => {
+    const res: AxiosResponse<LeaseUses[]> = await axios.get('/api/lease-uses')
+    setInitData(res.data.map(d => d.name))
+    return res.data.map(d => d.name)
+  }
+  const createOptions = async <T, >(data: T): Promise<string[]> => {
+    const res: AxiosResponse<LeaseUses[]> = await axios.post('/api/lease-uses', {name: data})
+    setInitData(res.data.map(d => d.name))
+    return res.data.map(d => d.name)
+
+  }
+  const [initData, setInitData] = useState<string[]>([])
+
   return (
     <div className={styles.container}>
       <Head>
@@ -28,19 +42,37 @@ const Home: NextPage = () => {
 
       <main className={styles.main}>
         <form onSubmit={handleSubmit(data => console.log(data))}>
-          <Controller
-            control={control}
-            name='nameList'
-            render={({field}) => (
-              <SelectInput
-                {...field}
-                setValue={setValue}
-                title="賃貸用途"
-                initData={["事務所", "店舗"]}
-              />
-            )}
-          />
+          <Stack>
+            <h3>SelectInput</h3>
+            <Controller
+              control={control}
+              name='nameList'
+              render={({field}) => (
+                <SelectInput
+                  {...field}
+                  setValue={setValue}
+                  title="賃貸用途"
+                  initData={["事務所", "店舗"]}
+                />
+              )}
+            />
+            <h3>AsyncSelectInput</h3>
+            <Controller
+              control={control}
+              name='asyncNameList'
+              render={({field}) => (
+                <AsyncSelectInput
+                  {...field}
+                  setValue={setValue}
+                  title="賃貸用途"
+                  loadOptions={loadOptions}
+                  createOption={createOptions}
+                />
+              )}
+            />
+          </Stack>
           <Button type="submit">save</Button>
+
         </form>
       </main>
     </div>

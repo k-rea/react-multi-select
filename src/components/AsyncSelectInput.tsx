@@ -1,5 +1,5 @@
 import * as React from "react";
-import {ChangeEvent, memo, useCallback, useEffect, useLayoutEffect, useRef, useState} from "react";
+import {ChangeEvent, useCallback, useEffect, useLayoutEffect, useRef, useState} from "react";
 import {useForm, SubmitHandler, UseFormSetValue} from "react-hook-form";
 import {
   Box,
@@ -25,7 +25,8 @@ import Visibility = Property.Visibility;
 
 type PropTypes = InputProps & {
   title: string,
-  initData: string[],
+  loadOptions: () => Promise<Array<string>>,
+  createOption: (data: string) => Promise<Array<string>>,
   setValue: UseFormSetValue<any>,
   placeholder?: string,
 };
@@ -34,24 +35,34 @@ type Inputs = {
   label: string,
 };
 
-const SelectInput = memo((props: PropTypes) => {
-  const {title, initData, placeholder, setValue} = props
+const AsyncSelectInput = (props: PropTypes) => {
+  const {
+    title,
+    loadOptions,
+    createOption,
+    placeholder,
+    setValue
+  } = props
 
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLInputElement>(null)
 
   const [visibility, setVisibility] = useState<ResponsiveValue<Visibility>>("hidden")
-  const [topLeft, setTopLeft] = useState<{ top: number, left: number }>({top: 0, left: 0})
+  const [dimension, setDimension] = useState<{ top: number, left: number }>({top: 0, left: 0})
   const [height, setHeight] = useState<number>(0)
-  const [baseData, setBaseData] = useState<string[]>(initData)
+
+  const [baseData, setBaseData] = useState<string[]>([])
   const [retData, setRetData] = useState<string[]>([])
   const [regexExp, setRegexExp] = useState<RegExp | string>('')
 
   const {isOpen, onOpen, onClose} = useDisclosure()
-  const {register, handleSubmit, reset, watch, formState: {errors, isSubmitting}} = useForm<Inputs>();
+  const {register, handleSubmit, reset, formState: {errors, isSubmitting}} = useForm<Inputs>();
 
-  const createOptionSubmit: SubmitHandler<Inputs> = data => {
-    setBaseData([...baseData, data.label])
+
+  const onSubmit: SubmitHandler<Inputs> = async (data) => {
+    await createOption(data.label)
+    setRetData([...retData, data.label])
+
     reset({
       label: '',
     }, {
@@ -65,22 +76,14 @@ const SelectInput = memo((props: PropTypes) => {
     onClose()
   }
 
-  const selectTagClick = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>, v: string) => {
+  const onButtonClick = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>, v: string) => {
     setBaseData(baseData.filter(d => d !== v))
     setRetData([...retData, v])
     !!props.name && setValue(props.name, [...retData, v])
     e.stopPropagation()
   }
 
-  const filterTag = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.currentTarget.value === '') {
-      setRegexExp('')
-    } else {
-      setRegexExp(new RegExp(`.*${e.currentTarget.value}.*`))
-    }
-  }
-
-  const removeSelectedTag = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>, v: string) => {
+  const closeTag = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>, v: string) => {
     setBaseData([...baseData, v])
     setRetData(retData.filter(d => d !== v))
     !!props.name && setValue(props.name, (retData.filter(d => d !== v)))
@@ -93,10 +96,25 @@ const SelectInput = memo((props: PropTypes) => {
       : ".*"
   }, [baseData, retData])
 
+  useEffect(() => {
+    const loadLocalOptions = async () => {
+      const ret = await loadOptions()
+      setBaseData(ret.filter(d => !retData.includes(d)))
+    }
+    loadLocalOptions()
+  }, [])
+
+  useEffect(() => {
+    if (!!inputRef.current) {
+      setDimension({top: inputRef.current.offsetTop, left: inputRef.current.offsetLeft})
+      setHeight(inputRef.current.offsetHeight)
+    }
+  }, [inputRef])
+
   useLayoutEffect(() => {
     const handleResize = () => {
       if (!!inputRef.current) {
-        setTopLeft({top: inputRef.current.offsetTop, left: inputRef.current.offsetLeft})
+        setDimension({top: inputRef.current.offsetTop, left: inputRef.current.offsetLeft})
         setHeight(inputRef.current.offsetHeight)
       } else {
         return
@@ -106,17 +124,9 @@ const SelectInput = memo((props: PropTypes) => {
     return () => window.removeEventListener('resize', handleResize)
   }, [inputRef])
 
-  useEffect(() => {
-    if (!!inputRef.current) {
-      setTopLeft({top: inputRef.current.offsetTop, left: inputRef.current.offsetLeft})
-      setHeight(inputRef.current.offsetHeight)
-    }
-  }, [inputRef])
-
-  // Eventの登録
+  // Click Event
   useEffect(() => {
     if (!inputRef.current || !listRef.current) return;
-
     const handleClickOutside = (e: MouseEvent) => {
       if (inputRef.current?.contains(e.target as Node) || listRef.current?.contains(e.target as Node)) {
         //内側をクリックしたときの処理
@@ -125,7 +135,6 @@ const SelectInput = memo((props: PropTypes) => {
         //外側をクリックしたときの処理
         setVisibility("hidden")
       }
-
     }
     //クリックイベントを設定
     document.addEventListener('click', handleClickOutside)
@@ -136,7 +145,17 @@ const SelectInput = memo((props: PropTypes) => {
     }
   }, [inputRef, listRef])
 
+  // const stringToNumber = (s: string) => Array.from(s).map(c => c.charCodeAt(0)).reduce((a, b) => a + b)
   const getHslColor = (s: string) => `hsl(${Array.from(s).map(c => c.charCodeAt(0)).reduce((a, b) => a + b) ^ 2 % 360}, 80%, 64%)`;
+
+  const filterTag = (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.currentTarget.value === '') {
+      setRegexExp('')
+    } else {
+      setRegexExp(new RegExp(`.*${e.currentTarget.value}.*`))
+    }
+  }
+
   return (
     <>
       <Input
@@ -164,7 +183,7 @@ const SelectInput = memo((props: PropTypes) => {
               <TagLabel>
                 {data}
               </TagLabel>
-              <TagCloseButton onClick={e => removeSelectedTag(e, data)}/>
+              <TagCloseButton onClick={e => closeTag(e, data)}/>
             </Tag>
           ))}
         </Box>
@@ -187,10 +206,10 @@ const SelectInput = memo((props: PropTypes) => {
         top={0}
         left={0}
         visibility={visibility}
-        transform={`translate(${topLeft.left}px,${topLeft.top + height + 10}px)`}
+        transform={`translate(${dimension.left}px,${dimension.top + height + 10}px)`}
         paddingY={1}
       >
-        {baseData.filter(v=> v.match(regexExp)).map(v => (
+        {baseData.filter(v => v.match(regexExp)).map(v => (
           <Button
             key={v}
             // variant='ghost'
@@ -198,7 +217,7 @@ const SelectInput = memo((props: PropTypes) => {
             justifyContent="flex-start"
             borderRadius={0}
             fontWeight="normal"
-            onClick={(e) => selectTagClick(e, v)}
+            onClick={(e) => onButtonClick(e, v)}
           >
             {v}
           </Button>
@@ -221,7 +240,7 @@ const SelectInput = memo((props: PropTypes) => {
       >
         <ModalOverlay/>
         <ModalContent>
-          <form onSubmit={handleSubmit(createOptionSubmit)}>
+          <form onSubmit={handleSubmit(onSubmit)}>
             <ModalHeader>{title} 新規作成</ModalHeader>
             <ModalCloseButton/>
             <ModalBody pb={6}>
@@ -255,6 +274,6 @@ const SelectInput = memo((props: PropTypes) => {
       </Modal>
     </>
   );
-});
-SelectInput.displayName = 'SelectInput'
-export default SelectInput;
+};
+AsyncSelectInput.displayName = 'SelectInput'
+export default AsyncSelectInput;
